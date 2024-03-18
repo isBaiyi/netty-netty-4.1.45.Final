@@ -433,11 +433,13 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
     @Override
     protected void run() {
+        // 记录执行io事件的次数
         int selectCnt = 0;
         for (;;) {
             try {
                 int strategy;
                 try {
+                    // 获取当前是什么事件，底层是通过selector.selectNow()进行获取io事件，如果为selectNow返回的为0，则设置值为select，从而进行阻塞
                     strategy = selectStrategy.calculateStrategy(selectNowSupplier, hasTasks());
                     switch (strategy) {
                     case SelectStrategy.CONTINUE:
@@ -447,6 +449,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                         // fall-through to SELECT since the busy-wait is not supported with NIO
 
                     case SelectStrategy.SELECT:
+                        // 获取定时任务，如果每月定时任务，则返回-1
                         long curDeadlineNanos = nextScheduledTaskDeadlineNanos();
                         if (curDeadlineNanos == -1L) {
                             curDeadlineNanos = NONE; // nothing on the calendar
@@ -454,6 +457,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                         nextWakeupNanos.set(curDeadlineNanos);
                         try {
                             if (!hasTasks()) {
+                                // 如果curDeadlineNanos=NONE，则执行selector.select()，否则把curDeadlineNanos转换为s，然后进行selector.select(timeoutMillis)
                                 strategy = select(curDeadlineNanos);
                             }
                         } finally {
@@ -476,8 +480,10 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 selectCnt++;
                 cancelledKeys = 0;
                 needsToSelectAgain = false;
+                // 执行io事件的比例，默认值为50，用户可以通过nioEventLoopGroup.setIoRatio(1)进行设置
                 final int ioRatio = this.ioRatio;
                 boolean ranTasks;
+                // io比例100%，先执行io事件任务，再执行普通任务或定时任务（正常情况不会这么配置，因为其他普通任务或定时任务无法被执行）
                 if (ioRatio == 100) {
                     try {
                         if (strategy > 0) {
@@ -488,15 +494,18 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                         ranTasks = runAllTasks();
                     }
                 } else if (strategy > 0) {
+                    // 默认会执行这里
                     final long ioStartTime = System.nanoTime();
                     try {
                         processSelectedKeys();
                     } finally {
                         // Ensure we always run tasks.
                         final long ioTime = System.nanoTime() - ioStartTime;
+                        // 按照当前默认的配置来说，io事件任务执行时间和普通任务（定时任务）的时间是1:1，就算普通任务没有执行完成也会停止，等下一次再执行
                         ranTasks = runAllTasks(ioTime * (100 - ioRatio) / ioRatio);
                     }
                 } else {
+                    // 不存在io任务，执行普通任务（定时任务）
                     ranTasks = runAllTasks(0); // This will run the minimum number of tasks
                 }
 
@@ -547,6 +556,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             }
             return true;
         }
+        // 解决NIO selector.select() 空转，CPU100%的问题
         if (SELECTOR_AUTO_REBUILD_THRESHOLD > 0 &&
                 selectCnt >= SELECTOR_AUTO_REBUILD_THRESHOLD) {
             // The selector returned prematurely many times in a row.

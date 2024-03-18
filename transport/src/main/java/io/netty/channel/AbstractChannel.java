@@ -462,8 +462,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
 
+            // 我们前面说到Channel是最重要的，会伴随整个客户端的Pipeline生命周期，这里就把eventLoop赋值给Channel
             AbstractChannel.this.eventLoop = eventLoop;
 
+            // 此处判断当前执行的线程是不是Nio线程，如果是Nio线程则执行register0方法，否则执行eventLoop.execute方法，最终都是执行register0方法
+            // 区别在于是否需要新起一个线程进行执行register0方法
             if (eventLoop.inEventLoop()) {
                 register0(promise);
             } else {
@@ -492,15 +495,19 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 if (!promise.setUncancellable() || !ensureOpen(promise)) {
                     return;
                 }
+                // 判断是否为第一次注册，默认是true
                 boolean firstRegistration = neverRegistered;
+                // 进行注册操作
                 doRegister();
                 neverRegistered = false;
                 registered = true;
 
                 // Ensure we call handlerAdded(...) before we actually notify the promise. This is needed as the
                 // user may already fire events through the pipeline in the ChannelFutureListener.
+                // 回调前面在ServerBootstrap的init方法添加的ChannelInitializer#initChannel方法
                 pipeline.invokeHandlerAddedIfNeeded();
 
+                // 设置promise回调AbstractBootstrap的initAndRegister方法
                 safeSetSuccess(promise);
                 pipeline.fireChannelRegistered();
                 // Only fire a channelActive if the channel has never been registered. This prevents firing
@@ -558,6 +565,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 invokeLater(new Runnable() {
                     @Override
                     public void run() {
+                        // 绑定OP_ACCEPT事件
                         pipeline.fireChannelActive();
                     }
                 });
